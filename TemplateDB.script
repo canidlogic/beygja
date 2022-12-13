@@ -1,0 +1,186 @@
+%beygja-db;
+
+# TemplateDB.script
+# =================
+#
+# This Shastina source file is a template for creating the Beygja
+# database and populating the various constant tables in the database.
+# It does not, however, import the core word and inflection data.
+#
+# Since the DIM data is not under an open-source license, this file does
+# not include any actual data from the DIM.  Rather, it is a template
+# that shows you what you need to fill in to create the actual database
+# script.  Look for the @@TODO: markers to see what you need to fill in.
+#
+# This script assumes that the DatabaseStructure.sql script which
+# structures the new database is in the current working directory.
+#
+# Entities
+# --------
+#
+# Double-quoted strings store UTF-8 strings.  No escaping supported, and
+# backslash not allowed.
+#
+# Numeric entities allow unsigned decimal integers.
+#
+# Operators are documented below.
+#
+# Operators
+# ---------
+#
+#   [sql-path:string] sql -
+#
+# Run the SQL commands in the SQL script at path [sql-path].  The path
+# is relative to the current working directory of the script
+# interpreter.
+#
+# Comments are allowed in the SQL script following two hyphens, and run
+# through the rest of the line.  Each SQL statement must end with a
+# semicolon, and nothing but whitespace and comments is allowed after
+# the final SQL statement.
+#
+# The SQL script parser is primitive, so only use the double hyphen for
+# comments and the semicolon to end SQL statements.  Do not attempt to
+# use double hyphens or semicolons within SQL string literals or you
+# will confuse the SQL script parser.
+#
+#   [table-name:string] table -
+#
+# Switch to table named [table-name] for output.  The given table name
+# should match exactly the name of a table in the database.
+#
+#   [column-name:string] column -
+#
+# Define a column in the current table.  This must be done before any of
+# the record statements in the table.  [column-name] is the name to use
+# for this column in the database.  The number of columns defined must
+# match exactly with the number of fields used in record statements
+# against the current table.  The first column definition is used for
+# the first record operator parameter, and so forth.
+#
+#   [tx:string] [is:string] [en:string] tx -
+#
+# Add record to table that has [tx] as abbreviated textual code, [is] as
+# Icelandic description, and [en] as English description.
+#
+#   [tx:string] [lv:integer] [is:string] [en:string] txl -
+#
+# Same as the tx operator, except it also accepts a level integer.
+#
+#   [lv:integer] [is:string] [en:string] txi -
+#
+# Same as the tx operator, except the main lookup code is a unique
+# integer level.
+#
+#   [wc:string] [tx:string] [is:string] [en:string] txc -
+#
+# Same as the tx operator, except it also accepts a word class textual
+# code.  The [tx] abbreviated code is only unique within its own word
+# class.  The first of these instructions will read the whole mapping of
+# word class codes to ID codes and then use this cache to translate each
+# of the given word class abbreviated codes into the appropriate numeric
+# keys.
+#   
+
+"DatabaseStructure.sql" sql
+
+"wclass" table # =======================================================
+"ctx" column
+"cis" column
+"cen" column
+
+# ----------------------------------------------------------------------
+# @@TODO: fill in all the word class tags here.
+#
+# Format:
+#
+#   "tag" "Icelandic description" "English description" tx
+# ----------------------------------------------------------------------
+
+"dom" table # ==========================================================
+"dtx" column
+"dlv" column
+"dis" column
+"den" column
+
+# Level values:
+#   0 = Common
+#   1 = Specialized
+#   2 = Proper Name
+
+# ----------------------------------------------------------------------
+# @@TODO: fill in all the semantic domains here.
+#
+# Format:
+#
+#   "domcode" 1 "Icelandic description" "English description" txl
+#
+# (The integer is one of the level values defined above.)
+# ----------------------------------------------------------------------
+
+"grade" table # ========================================================
+"giv" column
+"gis" column
+"gen" column
+
+# ----------------------------------------------------------------------
+# @@TODO: fill in all the grades here.
+#
+# Format:
+#
+#   2 "Icelandic description" "English description" txi
+#
+# (The integer is the DIM integer grade value.)
+# ----------------------------------------------------------------------
+
+"reg" table # ==========================================================
+"rtx" column
+"ris" column
+"ren" column
+
+# ----------------------------------------------------------------------
+# @@TODO: fill in all the language registers here.
+#
+# Format:
+#
+#   "REGCODE" "Icelandic description" "English description" tx
+# ----------------------------------------------------------------------
+
+"gflag" table # ========================================================
+"ftx" column
+"fis" column
+"fen" column
+
+# ----------------------------------------------------------------------
+# @@TODO: fill in all the grammar flags here.
+#
+# Format:
+#
+#   "FLAG" "Icelandic description" "English description" tx
+# ----------------------------------------------------------------------
+
+"ival" table # =========================================================
+"jtx" column
+"jis" column
+"jen" column
+
+# ----------------------------------------------------------------------
+# @@TODO: fill in all the inflection values.
+#
+# Format:
+#
+#   "VALUE" "Icelandic description" "English description" tx
+# ----------------------------------------------------------------------
+
+"itag" table # =========================================================
+"cid" column
+"mtx" column
+"mis" column
+"men" column
+
+# ----------------------------------------------------------------------
+# @@TODO: use the gentags.pl script on the tags.csv file in the DIM data
+# to generate all the records and then copy those records here.
+# ----------------------------------------------------------------------
+
+|;
