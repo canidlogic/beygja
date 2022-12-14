@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
 use v5.14;
 use warnings;
+use utf8;
 
 # Beygja imports
 use Beygja::Util qw(dimToVerbCode);
