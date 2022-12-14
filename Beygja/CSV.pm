@@ -1,6 +1,7 @@
 package Beygja::CSV;
 use v5.14;
 use warnings;
+use utf8;
 
 # Core imports
 use Scalar::Util qw(looks_like_number);
