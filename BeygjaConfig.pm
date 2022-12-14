@@ -41,10 +41,10 @@ errors indicating configuration has not been performed yet.
 # ----------------------------------------------------------------------
 
 my %DB_MAP = (
-  'verb' => '/media/pi/3V635FXG/Documents/NEW/dev_posted/beygja/derived/beygja_verb.sqlite',
+  'verb' => '/path/to/verb.sqlite',
 );
 
-use constant DB_MAP_CONFIGURED => 1;
+use constant DB_MAP_CONFIGURED => 0;
 
 =head2 FUNCTIONS
 
