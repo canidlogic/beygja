@@ -1,9 +1,9 @@
 package Beygja::Util;
 use v5.14;
 use warnings;
-use parent qw(Exporter);
-
 use utf8;
+
+use parent qw(Exporter);
 
 =head1 NAME
 
@@ -42,10 +42,17 @@ inflection code to indicate variants.  If there is no decimal integer
 suffix, the default order number of 1 will be returned.  Otherwise, the
 returned order number will match the decimal integer suffix.
 
-If you are bulk converting, you should put a cache in front of this
-function.
+This function uses an internal cache to speed things up.  If C<str> has
+already been queried, this returns the cached response instead of
+recomputing it.  C<str> values that don't successfully convert are
+I<not> cached, however.
 
 =cut
+
+# Cache of input strings to array references storing the translated
+# Beygja inflection code and the inflection order.
+#
+my %verbcode_cache;
 
 # Mapping of DIM elements within the inflection tags to the equivalent
 # Beygja verb inflection codes.
@@ -163,6 +170,15 @@ sub dimToVerbCode {
   my $str = shift;
   (not ref($str)) or die;
   
+  # If cached response, return that
+  if (defined $verbcode_cache{$str}) {
+    my $cr = $verbcode_cache{$str};
+    return ($cr->[0], $cr->[1]);
+  }
+  
+  # Store original string for caching purposes
+  my $original_input = $str;
+  
   # Extract the order number first
   my $order_number = 1;
   if ($str =~ /([0-9]+)\z/) {
@@ -216,6 +232,7 @@ sub dimToVerbCode {
   
   # Allow the exceptional past-tense infinitive
   if ($vic eq 'Iap') {
+    $verbcode_cache{$original_input} = ['Iap', $order_number];
     return ('Iap', $order_number);
   }
   
@@ -242,6 +259,7 @@ sub dimToVerbCode {
   # The "z" clipped number may only appear for "Maz"
   if ($vic =~ /z/) {
     if ($vic eq 'Maz') {
+      $verbcode_cache{$original_input} = ['Maz', $order_number];
       return ('Maz', $order_number);
     } else {
       return (undef, undef);
@@ -263,6 +281,7 @@ sub dimToVerbCode {
   }
   
   # If we got here, return the conversion
+  $verbcode_cache{$original_input} = [$vic, $order_number];
   return ($vic, $order_number);
 }
 
