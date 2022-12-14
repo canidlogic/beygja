@@ -1,12 +1,10 @@
 #!/usr/bin/env perl
 use v5.14;
 use warnings;
-
-# Use UTF-8 in string literals
 use utf8;
 
 # Beygja imports
-use BeygjaConfig;
+use BeygjaConfig qw(beygja_dbpath);
 use Beygja::CSV;
 use Beygja::DB;
 
@@ -16,11 +14,11 @@ use POSIX qw(floor);
 =head1 NAME
 
 beygja_words.pl - Import records from the Comprehensive Format word CSV
-file into the Beygja database.
+file into a Beygja database.
 
 =head1 SYNOPSIS
 
-  ./beygja_words.pl Storasnid_ord.csv 0
+  ./beygja_words.pl Storasnid_ord.csv 0 verb
 
 =head1 DESCRIPTION
 
@@ -30,18 +28,26 @@ The location of the database is determined by C<BeygjaConfig.pm>
 The first parameter is the path to the CSV file in Comprehensive Format
 for words.  The second parameter is the number of lines to skip at the
 start of the file (if there are header lines), or zero if there are no
-header lines.
+header lines.  The third parameter is the type of Beygja database that
+is being constructed.  Currently, only C<verb> is supported.
 
-The Beygja database must already have been constructed.  The tables
-C<wclass>, C<dom>, C<grade>, C<reg>, and C<gflag> should be filled in.
-Their contents will be loaded into memory by this script and if any
-record in the CSV file is encountered that refers to records that are
-missing from these auxiliary tables, the script will fail.
+A Beygja database of the given type must already have been constructed.
+The tables C<wclass>, C<dom>, C<grade>, C<reg>, and C<gflag> should be
+filled in.  Their contents will be loaded into memory by this script and
+if any record in the CSV file is encountered that refers to records that
+are missing from these auxiliary tables, the script will fail.
 
 The C<word>, C<wdom>, C<wreg>, and C<wflag> tables must be empty when
-this script runs.  They will be filled in by this script.
+this script runs.  They will be filled in by this script.  For the
+C<verb> type, only word records with a C<so> (verb) word class will be
+imported into the database.
 
 The process may take a long time.  Regular progress reports are issued.
+
+B<Note:> This import script merges the C<Í-I> grammatical tag into the
+C<I-Í> grammatical tag.  The former tag is not documented, and its
+difference from the latter tag is not evident.  See C<correctGflag()>
+for the function that corrects records from the input dataset.
 
 =cut
 
@@ -413,7 +419,7 @@ binmode(STDERR, ":encoding(UTF-8)") or die;
 
 # Get arguments
 #
-($#ARGV == 1) or die "Wrong number of program arguments!\n";
+($#ARGV == 2) or die "Wrong number of program arguments!\n";
 
 my $path = shift @ARGV;
 (-f $path) or die "Can't find file '$path'!\n";
@@ -422,9 +428,24 @@ my $skip_count = shift @ARGV;
 ($skip_count =~ /\A[0-9]+\z/) or die "Invalid skip count!\n";
 $skip_count = int($skip_count);
 
+my $dbtype = shift @ARGV;
+($dbtype eq 'verb') or die "Unsupported database type '$dbtype'!\n";
+
+# Based on the database type, fill in %allowed_wclass with a set of word
+# class codes; only word records that have a word class in this set will
+# be imported
+#
+my %allowed_wclass;
+if ($dbtype eq 'verb') {
+  $allowed_wclass{'so'} = 1;
+
+} else {
+  die;
+}
+
 # Connect to database using the configured path
 #
-my $dbc = Beygja::DB->connect(CONFIG_DBPATH, 0);
+my $dbc = Beygja::DB->connect(beygja_dbpath($dbtype), 0);
 
 # Perform a work block that will contain all operations
 #
@@ -512,6 +533,12 @@ for(my $rec = $csv->readRecord; defined $rec; $rec = $csv->readRecord) {
   my $r_gflags = $rec->[ 7];
   my $r_vis    = $rec->[ 8];
   my $r_syl    = $rec->[12];
+  
+  # If the word class of this record is not one of the classes allowed
+  # for this database type, skip the record
+  unless (defined $allowed_wclass{$r_wclass}) {
+    next;
+  }
   
   # Make sure ID is an unsigned decimal integer and convert to integer
   ($r_id =~ /\A[0-9]+\z/) or
