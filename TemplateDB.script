@@ -3,17 +3,21 @@
 # TemplateDB.script
 # =================
 #
-# This Shastina source file is a template for creating the Beygja
+# This Shastina source file is a template for creating a Beygja
 # database and populating the various constant tables in the database.
 # It does not, however, import the core word and inflection data.
+#
+# This script has conditional support so that it can be used to build
+# each of the different inflection database types.  Currently, only the
+# "verb" type is supported.
 #
 # Since the DIM data is not under an open-source license, this file does
 # not include any actual data from the DIM.  Rather, it is a template
 # that shows you what you need to fill in to create the actual database
 # script.  Look for the @@TODO: markers to see what you need to fill in.
 #
-# This script assumes that the DatabaseStructure.sql script which
-# structures the new database is in the current working directory.
+# This script assumes that the DBCommon.sql and DBVerb.sql scripts which
+# structure the new database are in the current working directory.
 #
 # Entities
 # --------
@@ -44,10 +48,22 @@
 # use double hyphens or semicolons within SQL string literals or you
 # will confuse the SQL script parser.
 #
+#   [sql-path:string] [dbtype:string] csql -
+#
+# Conditional version of the sql operator.  Works the same way, except
+# it only runs the script if the current database type being built
+# matches the [dbtype] parameter.
+#
 #   [table-name:string] table -
 #
 # Switch to table named [table-name] for output.  The given table name
 # should match exactly the name of a table in the database.
+#
+#   [table-name:string] [dbtype:string] ctable -
+#
+# Conditional version of the table operator.  Works the same way, except
+# it suppresses all database commands for this table unless the current
+# database type being built matches the [dbtype] parameter.
 #
 #   [column-name:string] column -
 #
@@ -71,18 +87,13 @@
 #
 # Same as the tx operator, except the main lookup code is a unique
 # integer level.
-#
-#   [wc:string] [tx:string] [is:string] [en:string] txc -
-#
-# Same as the tx operator, except it also accepts a word class textual
-# code.  The [tx] abbreviated code is only unique within its own word
-# class.  The first of these instructions will read the whole mapping of
-# word class codes to ID codes and then use this cache to translate each
-# of the given word class abbreviated codes into the appropriate numeric
-# keys.
 #   
 
-"DatabaseStructure.sql" sql
+# Build common tables and indices
+"DBCommon.sql" sql
+
+# Build type-specific tables and indices
+"DBVerb.sql" "verb" csql
 
 "wclass" table # =======================================================
 "ctx" column
@@ -170,17 +181,6 @@
 # Format:
 #
 #   "VALUE" "Icelandic description" "English description" tx
-# ----------------------------------------------------------------------
-
-"itag" table # =========================================================
-"cid" column
-"mtx" column
-"mis" column
-"men" column
-
-# ----------------------------------------------------------------------
-# @@TODO: use the gentags.pl script on the tags.csv file in the DIM data
-# to generate all the records and then copy those records here.
 # ----------------------------------------------------------------------
 
 |;
