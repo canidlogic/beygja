@@ -1,40 +1,42 @@
 #!/usr/bin/env perl
 use v5.14;
 use warnings;
+use utf8;
 
 # Beygja imports
-use BeygjaConfig;
+use BeygjaConfig qw(beygja_dbpath);
 use Beygja::CSV;
 use Beygja::DB;
+use Beygja::Util qw(dimToVerbCode);
 
 # Core imports
 use POSIX qw(floor);
 
 =head1 NAME
 
-beygja_forms.pl - Import records from the Comprehensive Format
-inflections CSV file into the Beygja database.
+beygja_iverb.pl - Import verb inflection records from the Comprehensive
+Format inflections CSV file into the Beygja verb database.
 
 =head1 SYNOPSIS
 
-  ./beygja_forms.pl Storasnid_beygm.csv 0
+  ./beygja_iverb.pl Storasnid_beygm.csv 0
 
 =head1 DESCRIPTION
 
-Fill a Beygja database with inflection records from the Comprehensive
-Format.  The location of the database is determined by
-C<BeygjaConfig.pm>
+Fill the Beygja verb database with verbal inflection records from the
+Comprehensive Format.  The location of the verb database is determined
+by C<BeygjaConfig.pm>
 
 The first parameter is the path to the CSV file in Comprehensive Format
 for inflectional forms.  The second parameter is the number of lines to
 skip at the start of the file (if there are header lines), or zero if
 there are no header lines.
 
-The Beygja database must already have been constructed.  The tables
-C<grade>, C<reg>, C<itag>, and C<ival> should be filled in.  Their
-contents will be loaded into memory by this script and if any record in
-the CSV file is encountered that refers to records that are missing from
-these auxiliary tables, the script will fail.
+The Beygja verb database must already have been constructed.  The tables
+C<grade>, C<reg>, and C<ival> should be filled in.  Their contents will
+be loaded into memory by this script and if any record in the CSV file
+is encountered that refers to records that are missing from these
+auxiliary tables, the script will fail.
 
 The C<word> table should also be filled in already.  If any inflected
 forms refer to words that have no record in the C<word> table, the
@@ -42,6 +44,22 @@ script will fail.
 
 The C<infl>, C<ireg>, and C<iflag> tables must be empty when this script
 runs.  They will be filled in by this script.
+
+Only inflection records that have a word class of C<so> (verb) will be
+processed by this script.  The inflection tags used in the DIM will be
+converted to the verbal inflection codes documented in
+C<VerbInflections.md>.  Where there are variants present, the C<iord>
+field will be used to record the different variant numbers.
+
+Since the variants in the dataset are not always consistently marked,
+the following system is used.  To get the base order number in the
+database, multiply the order number by 10.  Find the greatest existing
+combination of word-code-order for the matching word and code where the
+order is greater than or equal to the base order and less than the base
+order plus ten.  If no such combination exists, use the base order as
+the order.  Else, use one greater than the existing maximum, provided
+that this is less than the base order plus ten.  If it exceeds the base
+order plus ten, there are two many variants.
 
 The process may take a long time.  Regular progress reports are issued.
 
@@ -55,7 +73,7 @@ The process may take a long time.  Regular progress reports are issued.
 # through the file.  However, progress checks will only be printed if
 # STATUS_INTERVAL seconds have elapsed since the last progress check.
 #
-use constant STATUS_COUNT => 8192;
+use constant STATUS_COUNT => 1024;
 
 # The number of seconds that must pass between progress checks.
 #
@@ -94,14 +112,6 @@ my $grade_array = undef;
 # used in the database.  This will be loaded from the database.
 #
 my $reg_map = undef;
-
-# Mapping of word class + inflection tag abbreviated codes to the
-# numeric keys used in the database.  Since the inflection tags are only
-# unique within the word class, the numeric key for the word class as a
-# decimal integer is prefixed to the tag, followed by a comma, then the
-# inflection tag.  This will be loaded from the database.
-#
-my $itag_map = undef;
 
 # Mapping of inflection value abbreviated codes to the numeric keys used
 # in the database.  This will be loaded from the database.
@@ -265,38 +275,6 @@ sub regCache {
   }
 }
 
-# itagCache()
-# -----------
-#
-# Cache the inflection tag mapping from the database in itag_map.
-#
-# Has no effect if itag_map is already defined.
-#
-sub itagCache {
-  # Check parameters and state
-  ($#_ < 0) or die;
-  (defined $dbh) or die;
-  
-  # Ignore if already cached
-  (not (defined $itag_map)) or return;
-  
-  # Query the database and fill the cache
-  $itag_map = {};
-  
-  my $qr = $dbh->selectall_arrayref("SELECT mid, cid, mtx FROM itag");
-  if (defined $qr) {
-    for my $rec (@$qr) {
-      my $val_id = int($rec->[0]);
-      my $val_wc = int($rec->[1]);
-      my $val_tx = Beygja::DB->dbToString($rec->[2]);
-      
-      my $key = sprintf("%d,%s", $val_wc, $val_tx);
-      
-      $itag_map->{$key} = $val_id;
-    }
-  }
-}
-
 # ivalCache()
 # -----------
 #
@@ -371,9 +349,9 @@ my $skip_count = shift @ARGV;
 ($skip_count =~ /\A[0-9]+\z/) or die "Invalid skip count!\n";
 $skip_count = int($skip_count);
 
-# Connect to database using the configured path
+# Connect to verb database using the configured path
 #
-my $dbc = Beygja::DB->connect(CONFIG_DBPATH, 0);
+my $dbc = Beygja::DB->connect(beygja_dbpath('verb'), 0);
 
 # Perform a work block that will contain all operations
 #
@@ -391,7 +369,6 @@ statusMessage("Caching mappings...\n");
 
 gradeCache();
   regCache();
-itagCache();
 ivalCache();
 
 # Open the CSV file
@@ -449,38 +426,40 @@ for(my $rec = $csv->readRecord; defined $rec; $rec = $csv->readRecord) {
           $csv->number);
   
   # Get the relevant fields from this record
-  my $r_id    = $rec->[ 1];
-  my $r_infl  = $rec->[ 3];
-  my $r_itag  = $rec->[ 4];
-  my $r_grade = $rec->[ 5];
-  my $r_reg   = $rec->[ 6];
-  my $r_ival  = $rec->[ 7];
+  my $r_id     = $rec->[1];
+  my $r_wclass = $rec->[2];
+  my $r_infl   = $rec->[3];
+  my $r_itag   = $rec->[4];
+  my $r_grade  = $rec->[5];
+  my $r_reg    = $rec->[6];
+  my $r_ival   = $rec->[7];
+  
+  # Skip this record if it is not a verb inflection record
+  unless ($r_wclass eq 'so') {
+    next;
+  }
   
   # Make sure ID is an unsigned decimal integer and convert to integer
   ($r_id =~ /\A[0-9]+\z/) or
     die sprintf("CSV line %d: Invalid ID field!\n", $csv->number);
   $r_id = int($r_id);
   
-  # Look up the word record and figure out the numeric word class and
-  # the numeric key for the word
+  # Make sure ID refers to an existing word record and replace it with
+  # the numeric key used in the database
   my $qr = $dbh->selectrow_arrayref(
-              "SELECT wid, cid FROM word WHERE wbid=?", undef,
-              $r_id);
+                "SELECT wid FROM word WHERE wbid=?", undef,
+                $r_id);
   (defined $qr) or
-    die sprintf("CSV line %d: Can't find matching word '%d'\n",
+    die sprintf("CSV line %d: Can't find matching word ID '%d'\n",
                   $csv->number, $r_id);
+  $r_id = $qr->[0];
   
-  my $w_id = $qr->[0];
-  my $w_wc = $qr->[1];
-  
-  # Use the numeric word class together with the inflection tag to look
-  # up the inflection tag numeric key
-  my $itag_key = sprintf("%d,%s", $w_wc, $r_itag);
-  
-  (defined $itag_map->{$itag_key}) or
-    die sprintf("CSV line %d: Can't find composite tag '%s'\n",
-                  $csv->number, $itag_key);
-  $r_itag = $itag_map->{$itag_key};
+  # Convert the inflection tag into a Beygja verb inflection code and a
+  # variant order number
+  my ($verb_code, $order_number) = dimToVerbCode($r_itag);
+  (defined $verb_code) or
+    die sprintf("CSV line %d: Failed to convert inflection tag '%s'\n",
+                  $csv->number, $r_itag);
   
   # Parse grade as unsigned decimal integer
   ($r_grade =~ /\A[0-9]+\z/) or
@@ -550,7 +529,61 @@ for(my $rec = $csv->readRecord; defined $rec; $rec = $csv->readRecord) {
     }
   }
   
-  # @@TODO:
+  # The base order is the parsed order number times ten
+  my $base_order = $order_number * 10;
+  
+  # Adjust the order number
+  $qr = $dbh->selectrow_arrayref(
+    "SELECT iord FROM infl "
+    . "WHERE wid = ? AND icode = ? AND iord >= ? AND iord < ? "
+    . "ORDER BY iord DESC", undef,
+    $r_id, $verb_code, $base_order, ($base_order + 10));
+  if (defined $qr) {
+    # Records defined, so get the maximum defined order number
+    my $max_ord = $qr->[0];
+    
+    # Fail if max_ord is nine more than base_order
+    unless ($max_ord < $base_order + 9) {
+      die sprintf(
+        "CSV line %d: Too many inflectional variants!\n",
+        $csv->number);
+    }
+    
+    # Assign the order number to one greater than the maximum
+    $order_number = $max_ord + 1;
+    
+  } else {
+    # No relevant records defined yet, so use the base_order
+    $order_number = $base_order;
+  }
+  
+  # Add the main inflection record
+  $dbh->do(
+    "INSERT INTO infl (iid, wid, icode, iord, iform, gid) "
+    . "VALUES (?,?,?,?,?,?)", undef,
+    $next_infl_id,
+    $r_id,
+    $verb_code,
+    $order_number,
+    Beygja::DB->stringToDB($r_infl),
+    $r_grade);
+  
+  # Add any register mappings
+  for my $rg (@regs) {
+    $dbh->do(
+      "INSERT INTO ireg (iid, rid) VALUES (?,?)", undef,
+      $next_infl_id, $rg);
+  }
+  
+  # Add any inflectional values
+  for my $vf (@ivals) {
+    $dbh->do(
+      "INSERT INTO iflag (iid, jid) VALUES (?,?)", undef,
+      $next_infl_id, $vf);
+  }
+  
+  # Move to the next inflection ID code
+  $next_infl_id++;
 }
 
 # If we got here, finish the work block successfully
