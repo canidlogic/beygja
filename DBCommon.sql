@@ -1,6 +1,6 @@
--- =============================================================== --
--- SQL script to create all the tables and indices in the database --
--- =============================================================== --
+-- ============================================================== --
+-- SQL script to create common tables and indices in the database --
+-- ============================================================== --
 
 -- The wclass table stores word classes, which includes parts of speech
 -- and noun classes
@@ -128,21 +128,6 @@ CREATE TABLE wflag (
 CREATE UNIQUE INDEX ix_wflag_rec
   ON wflag(wid, fid);
 
--- The itag table stores inflectional tags
---
-CREATE TABLE itag (
-  mid   INTEGER PRIMARY KEY ASC,  -- Built-in primary key
-  cid   INTEGER NOT NULL          -- [ -> wclass table ]
-          REFERENCES wclass(cid),
-  mtx   TEXT NOT NULL,            -- Abbreviated textual code
-  mis   TEXT NOT NULL,            -- Icelandic description
-  men   TEXT NOT NULL,            -- English description
-  UNIQUE (cid, mtx)
-);
-
-CREATE UNIQUE INDEX ix_itag_rec
-  ON itag(cid, mtx);
-
 -- The ival table stores inflectional values
 --
 CREATE TABLE ival (
@@ -154,49 +139,3 @@ CREATE TABLE ival (
 
 CREATE UNIQUE INDEX ix_ival_jtx
   ON ival(jtx);
-
--- The infl table stores individual inflected forms
---
-CREATE TABLE infl (
-  iid   INTEGER PRIMARY KEY ASC,  -- Built-in primary key
-  wid   INTEGER NOT NULL          -- [ -> word table ]
-          REFERENCES word(wid),
-  iform TEXT NOT NULL,            -- Inflectional form
-  mid   INTEGER NOT NULL          -- [ -> itag table ]
-          REFERENCES itag(mid),
-  gid   INTEGER NOT NULL          -- [ -> grade table ]
-          REFERENCES grade(gid)
-);
-
-CREATE INDEX ix_infl_wid
-  ON infl(wid);
-
--- The ireg table associates sets of language registers with
--- inflectional forms
---
-CREATE TABLE ireg (
-  qid   INTEGER PRIMARY KEY ASC,  -- Built-in primary key
-  iid   INTEGER NOT NULL          -- [ -> infl table ]
-          REFERENCES infl(iid),
-  rid   INTEGER NOT NULL          -- [ -> reg table ]
-          REFERENCES reg(rid),
-  UNIQUE (iid, rid)
-);
-
-CREATE UNIQUE INDEX ix_ireg_rec
-  ON ireg(iid, rid);
-
--- The iflag table associates sets of inflectional values with
--- inflectional forms
---
-CREATE TABLE iflag (
-  nid   INTEGER PRIMARY KEY ASC,  -- Built-in primary key
-  iid   INTEGER NOT NULL          -- [ -> infl table ]
-          REFERENCES infl(iid),
-  jid   INTEGER NOT NULL          -- [ -> ival table ]
-          REFERENCES ival(jid),
-  UNIQUE (iid, jid)
-);
-
-CREATE UNIQUE INDEX ix_iflag_rec
-  ON iflag(iid, jid);
