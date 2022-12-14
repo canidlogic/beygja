@@ -1,6 +1,7 @@
 package Beygja::DB;
 use v5.14;
 use warnings;
+use utf8;
 
 # Database imports
 #
@@ -14,15 +15,15 @@ use Encode qw(decode encode);
 
 =head1 NAME
 
-Beygja::DB - Manage the connection to the Beygja database.
+Beygja::DB - Manage the connection to a Beygja database.
 
 =head1 SYNOPSIS
 
   use Beygja::DB;
-  use BeygjaConfig;
+  use BeygjaConfig qw(beygja_dbpath);
   
   # Connect to database using the configured path
-  my $dbc = Beygja::DB->connect(CONFIG_DBPATH, 0);
+  my $dbc = Beygja::DB->connect(beygja_dbpath('verb'), 0);
   
   # Perform a work block
   my $dbh = $dbc->beginWork('rw');
@@ -37,9 +38,13 @@ Beygja::DB - Manage the connection to the Beygja database.
 
 =head1 DESCRIPTION
 
-Module that opens and manages a connection to the Beygja database, which
+Module that opens and manages a connection to a Beygja database, which
 is a SQLite database.  This module also supports a transaction system on
 the database connection.
+
+Construct an instance using the C<connect()> constructor.  It is
+recommended that you get the database path from the C<beygja_dbpath()>
+function exported by the C<BeygjaConfig> module.
 
 To get the database handle, you use the C<beginWork> method and specify
 whether this is a read-only transaction or a read-write transaction.  If
@@ -51,12 +56,6 @@ transaction when a read-only transaction is currently active, though
 starting a read-only transaction while a read-write transaction is
 active is acceptable.
 
-The database handle is configured to generate fatal errors if there are
-any kind of database errors (RaiseError behavior is enabled).
-Furthermore, the destructor of this class is configured to perform a
-rollback if a transaction is still active when the script exits
-(including in the event of stopping due to a fatal error).
-
 Each call to C<beginWork> should have a matching C<finishWork> call
 (except in the event of a fatal error).  If the internal nesting counter
 indicates that this is not the outermost work block, then the internal
@@ -64,6 +63,17 @@ nesting counter is merely decremented.  If the internal nesting counter
 indicates that this is the outermost work block, then C<finishWork> will
 commit the transaction.  (If a fatal error occurs during commit, the
 result is a rollback.)
+
+The database handle is configured to generate fatal errors if there are
+any kind of database errors (RaiseError behavior is enabled).
+Furthermore, the destructor of this class is configured to perform a
+rollback if a transaction is still active when the script exits
+(including in the event of stopping due to a fatal error).
+
+B<Important:> The database handle is configured to use raw binary
+strings.  This means that you will need to use the provided static
+methods C<stringToDB()> and C<dbToString()> to convert between Unicode
+strings and raw binary strings when interacting with the database.
 
 As shown in the synopsis, all you have to do is start with C<beginWork>
 to get the database handle and call C<finishWork> once you are done with
@@ -124,7 +134,8 @@ sub dbToString {
 
 Construct a new database connection object.  C<db_path> is the path in
 the local file system to the SQLite database file.  Normally, you get
-this from the C<BeygjaConfig> module, as shown in the synopsis.
+this from the C<beygja_dbpath()> function in the C<BeygjaConfig> module,
+as shown in the synopsis.
 
 The C<new_db> parameter should normally be set to false (0).  In this
 normal mode of operation, the constructor will check that the given path
