@@ -1,9 +1,10 @@
 #!/usr/bin/env perl
 use v5.14;
 use warnings;
+use utf8;
 
 # Beygja imports
-use BeygjaConfig;
+use BeygjaConfig qw(beygja_dbpath);
 use Beygja::DB;
 
 # Non-core imports
@@ -14,12 +15,12 @@ use Shastina::Parser;
 
 =head1 NAME
 
-dbrun.pl - Run a database generation script to generate and populate the
+dbrun.pl - Run a database generation script to generate and populate a
 Beygja database.
 
 =head1 SYNOPSIS
 
-  ./dbrun.pl < db.script
+  ./dbrun.pl verb < db.script
 
 =head1 DESCRIPTION
 
@@ -27,12 +28,16 @@ Creates a brand-new Beygja database and runs the given Shastina script
 given on standard input to structure the database and populate it with
 initial values.
 
+As an argument, you must pass which database type you want to build.
+Currently, only C<verb> is supported.  This type will be used to select
+the path of the database file as well as affecting the interpretation of
+conditionals within the database script.
+
 The location of the database is determined by the C<BeygjaConfig.pm>
 module that this script imports.  The database must not already exist or
 this script will fail.
 
-See the documented template of the database script for the structure of
-the database script.
+See C<TemplateDB.script> for the structure of the database script.
 
 =cut
 
@@ -46,21 +51,22 @@ the database script.
 #
 my $dbh = undef;
 
-# Each "table" op fills this in with the name of a table
+# Each "(c)table" op fills this in with the name of a table
 #
 my $table_name = undef;
+
+# Each "(c)table" op fills in the table_suppress flag, which will be 1
+# if all database commands for this table should be suppressed, and zero
+# otherwise; table always sets this to zero, while ctable uses
+# conditionals to figure out its setting
+#
+my $table_suppress = undef;
 
 # Mapping of record field indices to column names, as established by the
 # "column" ops; will be reset each time the table_name changes; when
 # defined, it is an array reference
 #
 my $field_names = undef;
-
-# When the first "txc" op is run, this will be filled in with a hash
-# reference mapping word class short codes to word class numeric IDs as
-# used in the database
-#
-my $wc_map = undef;
 
 # ===============
 # Local functions
@@ -76,6 +82,9 @@ my $wc_map = undef;
 # currently registered with @$field_names.
 #
 # $lnum is the line number, for error reporting purposes.
+#
+# If table_suppress is set, then this function will silently ignore the
+# request and not modify the database.
 #
 sub addRecord {
   # Check parameter count
@@ -96,7 +105,13 @@ sub addRecord {
   (defined $dbh) or die;
   (defined $table_name) or
     die sprintf("Line %d: Table must be open for records!\n", $lnum);
+  (defined $table_suppress) or die;
   (defined $field_names) or die;
+  
+  # If output is suppressed, skip the rest of this procedure
+  if ($table_suppress) {
+    return;
+  }
   
   # Check we have enough field names
   (scalar(@_) <= scalar(@$field_names)) or
@@ -121,33 +136,6 @@ sub addRecord {
   
   # Perform the insertion
   $dbh->do($sql, undef, @_);
-}
-
-# cacheWCMap()
-# ------------
-#
-# Define the wc_map cache if it is not already defined.
-#
-sub cacheWCMap {
-  # Check parameters
-  ($#_ < 0) or die;
-  
-  # Ignore if already defined
-  (not defined $wc_map) or return;
-  
-  # Make sure we have a handle
-  (defined $dbh) or die;
-  
-  # Get all the mappings
-  my $qr = $dbh->selectall_arrayref('SELECT cid, ctx FROM wclass');
-  ((ref($qr) eq 'ARRAY') and (scalar(@$qr) > 0)) or
-    die "Define word classes before using txc operator!\n";
-  
-  # Build the mappings
-  $wc_map = {};
-  for my $rec (@$qr) {
-    $wc_map->{Beygja::DB->dbToString($rec->[1])} = $rec->[0];
-  }
 }
 
 # sqlScript($path)
@@ -280,14 +268,18 @@ sub popInteger {
 # Program entrypoint
 # ==================
 
-# Check arguments
+# Get arguments
 #
-($#ARGV < 0) or die "Not expecting program arguments!\n";
+($#ARGV == 0) or die "Wrong number of program arguments!\n";
+
+my $dbtype = shift @ARGV;
+($dbtype eq 'verb') or
+  die "Unsupported database type '$dbtype'!\n";
 
 # Wrap standard input as a Shastina input source
 #
 my $src = Shastina::InputSource->load;
-(defined $src) or die "Failed to load script as input source!\n";
+(defined $src) or die "Failed to load input as Shastina source!\n";
 
 # Build a Shastina parser around the input source
 #
@@ -330,7 +322,7 @@ my @stack;
 
 # Connect to database using the configured path
 #
-my $dbc = Beygja::DB->connect(CONFIG_DBPATH, 1);
+my $dbc = Beygja::DB->connect(beygja_dbpath($dbtype), 1);
 
 # Perform a work block that will contain all operations
 #
@@ -386,6 +378,14 @@ for($ent = $sr->readEntity; ref($ent); $ent = $sr->readEntity) {
       my $spath = popString(\@stack, $lnum);
     
       sqlScript($spath);
+      
+    } elsif ($opname eq 'csql') {
+      my $ctype = popString(\@stack, $lnum);
+      my $spath = popString(\@stack, $lnum);
+      
+      if ($ctype eq $dbtype) {
+        sqlScript($spath);
+      }
     
     } elsif ($opname eq 'table') {
       my $tname = popString(\@stack, $lnum);
@@ -394,8 +394,25 @@ for($ent = $sr->readEntity; ref($ent); $ent = $sr->readEntity) {
         die sprintf("Line %d: Invalid table name '%s'!\n",
                     $lnum, $tname);
       
-      $table_name = $tname;
-      $field_names = [];
+      $table_name     = $tname;
+      $table_suppress = 0;
+      $field_names    = [];
+      
+    } elsif ($opname eq 'ctable') {
+      my $ctype = popString(\@stack, $lnum);
+      my $tname = popString(\@stack, $lnum);
+      
+      ($tname =~ /\A[A-Za-z_][A-Za-z_0-9]*\z/) or
+        die sprintf("Line %d: Invalid table name '%s'!\n",
+                    $lnum, $tname);
+      
+      $table_name     = $tname;
+      $table_suppress = 0;
+      $field_names    = [];
+      
+      unless ($ctype eq $dbtype) {
+        $table_suppress = 1;
+      }
       
     } elsif ($opname eq 'column') {
       my $cname = popString(\@stack, $lnum);
@@ -431,20 +448,6 @@ for($ent = $sr->readEntity; ref($ent); $ent = $sr->readEntity) {
       my $lv = popInteger(\@stack, $lnum);
       
       addRecord($lnum, $lv, $is, $en);
-      
-    } elsif ($opname eq 'txc') {
-      my $en = popString(\@stack, $lnum);
-      my $is = popString(\@stack, $lnum);
-      my $tx = popString(\@stack, $lnum);
-      my $wc = popString(\@stack, $lnum);
-      
-      cacheWCMap();
-      defined($wc_map->{$wc}) or
-        die sprintf("Line %d: Unrecognized word class '%s'!\n",
-                    $lnum, $wc);
-      $wc = int($wc_map->{$wc});
-      
-      addRecord($lnum, $wc, $tx, $is, $en);
       
     } else {
       die sprintf("Line %d: Unrecognized operation!\n", $lnum);
