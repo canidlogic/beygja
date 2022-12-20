@@ -20,8 +20,14 @@ Beygja::Util - Beygja utility functions.
 
   use Beygja::Util qw(
     isInteger
+    isIcelandic
+    stemSyllables
+    stemUShift
     wordList
     verbParadigm
+    findMixedVerb
+    isStrongVerb
+    isSpecialVerb
     dimToVerbCode
   );
   
@@ -34,6 +40,20 @@ Beygja::Util - Beygja utility functions.
   if (isInteger($val)) {
     ...
   }
+  
+  # Check whether a value is a non-empty string in lowercase Icelandic
+  if (isIcelandic($str)) {
+    ...
+  }
+  
+  # Figure out how many stem syllables for a given word ID
+  my $sylcount = stemSyllables($dbc, $word_key);
+  if (defined $sylcount) {
+    ...
+  }
+  
+  # Apply U-shift to a stem
+  my $ushifted = stemUShift($stem, $stem_syllable_count);
   
   # Go through a sorted and vetted word list
   my @wlist = wordList($dbc, 'core');
@@ -51,6 +71,22 @@ Beygja::Util - Beygja utility functions.
     for my $variant (@{$vpara{"Faip3v"}}) {
       ...
     }
+  }
+  
+  # Check whether verb is mixed and get base mixed infinitive if it is
+  my $mixed_inf = findMixedVerb($dbc, $infinitive);
+  if (defined $mixed_inf) {
+    ...
+  }
+  
+  # Check a verb paradigm to see if the verb is a strong verb
+  if (isStrongVerb(\%vpara)) {
+    ...
+  }
+  
+  # Check an infinitive to see if a verb is one of the special verbs
+  if (isSpecialVerb($infinitive)) {
+    ...
   }
   
   # Convert a DIM tag to a verb code and order number
@@ -219,6 +255,157 @@ sub isInteger {
   } else {
     return 0;
   }
+}
+
+=item B<isIcelandic(val)>
+
+Check whether a given value is a non-empty string that only contains
+codepoints within the set of lowercase Icelandic letters.
+
+=cut
+
+sub isIcelandic {
+  # Get parameter
+  ($#_ == 0) or die;
+  my $val = shift;
+  
+  # Check that it is a scalar
+  (not ref($val)) or return 0;
+  
+  # Check that it is a non-empty lowercase Icelandic string
+  if ($val =~ /\A[a-záéíóúýðþæö]+\z/) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+=item B<stemSyllables(dbc, wordkey)>
+
+Figure out the number of stem syllables that are recorded for a word in
+a Beygja database.
+
+C<dbc> is the C<Beygja::DB> connection.  All types of Beygja databases
+are supported by this function.
+
+C<wordkey> is the primary key of the word to query.
+
+The return value is either an integer greater than zero that counts the
+number of stem syllables, or C<undef> if the stem syllable count is not
+available in the database for that word.
+
+=cut
+
+sub stemSyllables {
+  # Get parameters
+  ($#_ == 1) or die;
+  
+  my $dbc = shift;
+  (ref($dbc) and $dbc->isa("Beygja::DB")) or die;
+  
+  my $wordkey = shift;
+  (isInteger($wordkey)) or die;
+  
+  # Perform query
+  my $dbh = $dbc->beginWork('r');
+  my $qr = $dbh->selectrow_arrayref(
+              "SELECT wsy FROM word WHERE wid=?", undef,
+              $wordkey);
+  
+  (defined $qr) or die "Failed to query word ID '$wordkey'";
+  my $result = $qr->[0];
+  isInteger($result) or
+    die "Word ID '$wordkey' has invalid syllable count";
+  
+  # If result is less than one, set to undef
+  unless ($result >= 1) {
+    $result = undef;
+  }
+  
+  # Return result
+  return $result;
+}
+
+=item B<stemUShift(stem, syl_count)>
+
+Given a stem and a stem syllable count, return the U-shifted stem.
+
+C<stem> is the stem to shift.  It must pass C<isIcelandic()>.  The stem
+should not have any inflectional endings.  For infinitive stems that end
+in "a" you should probably I<not> include that final "a" in the stem
+you pass to this function.
+
+C<syl_count> is an integer greater than zero that indicates how many
+syllables are in the stem.  This is used to determine the first vowel in
+the passed stem that is subject to U-shift.  If the passed count is
+greater than the number of syllables in the stem, it will be clamped to
+the total number of syllables in the stem.
+
+=cut
+
+sub stemUShift {
+  # Get parameters
+  ($#_ == 1) or die;
+  
+  my $v_stem = shift;
+  isIcelandic($v_stem) or die;
+  
+  my $sycount = shift;
+  (isInteger($sycount) and ($sycount > 0)) or die;
+  
+  # Replace digraphs au, ei, ey with 1, 2, 3 respectively; since we
+  # checked that stem passes isIcelandic(), these numbers are not in the
+  # passed stem already
+  my $va_stem = $v_stem;
+  
+  $va_stem =~ s/au/1/g;
+  $va_stem =~ s/ei/2/g;
+  $va_stem =~ s/ey/3/g;
+  
+  # If there are no standalone a vowels in altered stem, nothing to do
+  unless ($va_stem =~ /a/) {
+    return $v_stem;
+  }
+  
+  # Build an index of all vowels and dipthongs in the altered v-stem
+  my @vloc;
+  while ($va_stem =~ /[aeiouyáéíóúýæö123]/g) {
+    push @vloc, (pos($va_stem) - 1);
+  }
+  
+  # Count backwards using the syllable count to find the base stem
+  # syllable
+  my $base_index = scalar(@vloc) - $sycount;
+
+  # Make sure base stem syllable is at least zero
+  unless ($base_index >= 0) {
+    $base_index = 0;
+  }
+  
+  # Split altered stem into unshifted prefix, base vowel, and a suffix
+  # that comes after the initial stem a
+  my $prefix = substr($va_stem, 0, $vloc[$base_index]);
+  my $base_v = substr($va_stem, $vloc[$base_index], 1);
+  my $suffix = substr($va_stem, $vloc[$base_index] + 1);
+
+  # If base vowel is "a" change to 'ö'
+  if ($base_v eq 'a') {
+    $base_v = 'ö';
+  }
+
+  # Shift all a vowels in suffix to u
+  $suffix =~ s/a/u/g;
+  
+  # Rejoin the U-shifted stem
+  $va_stem = $prefix . $base_v . $suffix;
+  
+  # Substitute digraphs back in for numbers
+  $va_stem =~ s/1/au/g;
+  $va_stem =~ s/2/ei/g;
+  $va_stem =~ s/3/ey/g;
+  
+  # Return altered stem
+  return $va_stem;
 }
 
 =item B<wordList(dbc, setcode)>
@@ -523,6 +710,254 @@ sub verbParadigm {
   return %results;
 }
 
+=item B<findMixedVerb(dbc, infinitive)>
+
+Given an infinitive and a Beygja verb database connection, figure out
+whether a verb is mixed, and find its base mixed infinitive if it is.
+
+C<dbc> is a C<Beygja::DB> instance that must refer to the verb database.
+It is only used in the first call to this function.  The first call will
+cache the whole mixed verb table in memory and use the cache for all
+subsequent calls.
+
+C<infinitive> is the infinitive of the verb to check.  If a middle
+infinitive is passed, it will be converted to an active infinitive by
+this function.  Once the active infinitive is obtained, this function
+will check whether the ending of the active infinitive matches any of
+the mixed infinitives in the C<mixverb> table.  If a match is found, the
+matching mixed infinitive is returned.  Else, C<undef> is returned if
+the given infinitive is not for a mixed verb.
+
+The passed infinitive must pass C<isIcelandic()>.
+
+If a defined value is returned by this function, it will match a
+substring of the passed infinitive that starts at the last letter if the
+passed infinitive was active, or immediately before the "st" suffix if
+the passed infinitive was middle.
+
+=cut
+
+# The minimum and maximum lengths of a key in MIXVERB_SET.
+#
+# These are filled in when the mixed verbs are first cached in memory.
+#
+my $MIXVERB_MAXLEN = undef;
+my $MIXVERB_MINLEN = undef;
+
+# The set of mixed verbs.
+#
+# This is loaded from the mixverb table in the database.  Keys are
+# infinitives and values just map to 1.  This set is only valid when
+# MIXVERB_MAXLEN is defined.
+#
+my %MIXVERB_SET;
+
+# The public function
+#
+sub findMixedVerb {
+  # Get parameters
+  ($#_ == 1) or die;
+  
+  my $dbc = shift;
+  (ref($dbc) and $dbc->isa("Beygja::DB")) or die;
+  
+  my $inf = shift;
+  isIcelandic($inf) or die;
+  
+  # Cache the mixed verb set if not already cached
+  unless (defined $MIXVERB_MAXLEN) {
+    # Open read work block
+    my $dbh = $dbc->beginWork('r');
+    my $qr;
+    
+    # Query the mixed verb infinitives
+    $qr = $dbh->selectall_arrayref('SELECT mixverb_inf FROM mixverb');
+    if (defined $qr) {
+      for my $rec (@$qr) {
+        # Get the current mixed verb infinitive and add it to set
+        my $vi = Beygja::DB->dbToString($rec->[0]);
+        $MIXVERB_SET{$vi} = 1;
+        
+        # Update length statistics
+        if (defined $MIXVERB_MAXLEN) {
+          # Statistics defined, so update them
+          if (length($vi) > $MIXVERB_MAXLEN) {
+            $MIXVERB_MAXLEN = length($vi);
+          }
+          
+          if (length($vi) < $MIXVERB_MINLEN) {
+            $MIXVERB_MINLEN = length($vi);
+          }
+          
+        } else {
+          # Statistics not defined yet, so initialize them
+          $MIXVERB_MAXLEN = length($vi);
+          $MIXVERB_MINLEN = $MIXVERB_MAXLEN;
+        }
+      }
+    }
+    
+    # If we didn't have any records, set the lengths to zero
+    unless (defined $MIXVERB_MAXLEN) {
+      $MIXVERB_MAXLEN = 0;
+      $MIXVERB_MINLEN = 0;
+    }
+    
+    # If we got here, successfully close the read work block
+    $dbc->finishWork;
+  }
+  
+  # If we were passed a middle infinitive that ends in -st, drop the
+  # final -st to get the active infinitive
+  $inf =~ s/st\z//;
+  
+  # Let $max_compare be the minimum of MIXVERB_MAXLEN and the length of
+  # the active infinitive
+  my $max_compare = length($inf);
+  unless ($max_compare <= $MIXVERB_MAXLEN) {
+    $max_compare = $MIXVERB_MAXLEN;
+  }
+  
+  # Start with mixed_verb undefined
+  my $mixed_verb = undef;
+  
+  # Look for matches at the end of the given infinitive
+  for(my $i = $max_compare; $i >= $MIXVERB_MINLEN; $i--) {
+    # Get the current ending
+    my $ce = substr($inf, 0 - $i);
+    
+    # Check whether in the set
+    if (defined $MIXVERB_SET{$ce}) {
+      $mixed_verb = $ce;
+      last;
+    }
+  }
+  
+  # Return result
+  return $mixed_verb;
+}
+
+=item B<isStrongVerb(paradigm)>
+
+Given a reference to a verb paradigm map, check whether the verb is a
+strong verb.
+
+C<paradigm> is a reference to a hash containing a verb paradigm, such as
+is returned by the C<verbParadigm()> function.
+
+If the verb has any C<Faip3v> form that does not end with an "i" or it
+has any C<Fmip3v> form that does not end with an "ist" then the verb is
+a strong verb.  In all other cases, the verb is not a strong verb.
+
+=cut
+
+sub isStrongVerb {
+  # Get parameter
+  ($#_ == 0) or die;
+  my $vp = shift;
+  (ref($vp) eq 'HASH') or die;
+  
+  # Start with strong flag clear
+  my $strong_flag = 0;
+  
+  # Check both Faip3v and Fmip3v for strong forms
+  for my $iform ('Faip3v', 'Fmip3v') {
+    # Proceed only if form is defined
+    if (defined $vp->{$iform}) {
+      # Check scalar or array value
+      if (ref($vp->{$iform})) {
+        # Array value, so check each
+        for my $vf (@{$vp->{$iform}}) {
+          # Check for appropriate ending
+          if ($iform eq 'Faip3v') {
+            unless ($vf =~ /i\z/) {
+              $strong_flag = 1;
+              last;
+            }
+          
+          } elsif ($iform eq 'Fmip3v') {
+            unless ($vf =~ /ist\z/) {
+              $strong_flag = 1;
+              last;
+            }
+          
+          } else {
+            die;
+          }
+        }
+        
+        # If strong flag now set, leave loop
+        (not $strong_flag) or last;
+        
+      } else {
+        # Scalar, so check for appropriate ending
+        if ($iform eq 'Faip3v') {
+          unless ($vp->{$iform} =~ /i\z/) {
+            $strong_flag = 1;
+            last;
+          }
+          
+        } elsif ($iform eq 'Fmip3v') {
+          unless ($vp->{$iform} =~ /ist\z/) {
+            $strong_flag = 1;
+            last;
+          }
+          
+        } else {
+          die;
+        }
+      }
+    }
+  }
+  
+  # Return resulting strong flag
+  return $strong_flag;
+}
+
+=item B<isSpecialVerb(infinitive)>
+
+Given an infinitive, check whether it is one of the 11 highly irregular
+"special" verbs.
+
+The special verbs include the 10 preterite-present verbs as well as the
+copular verb C<vera>.
+
+The passed infinitive must pass C<isIcelandic()>.
+
+=cut
+
+# Set of the headwords for all preterite-present verbs plus vera.
+#
+my %SPECIAL_VERBS = (
+  "eiga"  => 1,
+  "kunna" => 1,
+  "mega"  => 1,
+  "muna"  => 1,
+  "munu"  => 1,
+  "skulu" => 1,
+  "unna"  => 1,
+  "vera"  => 1,
+  "vilja" => 1,
+  "vita"  => 1,
+  "þurfa" => 1
+);
+
+# The public function
+#
+sub isSpecialVerb {
+  # Get parameter
+  ($#_ == 0) or die;
+  my $inf = shift;
+  isIcelandic($inf) or die;
+  
+  # Check whether the verb is in the set
+  if (defined $SPECIAL_VERBS{$inf}) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
 =item B<dimToVerbCode(str)>
 
 Parse an inflection tag from the DIM data into a Beygja verb inflection
@@ -793,8 +1228,14 @@ sub dimToVerbCode {
 
 our @EXPORT_OK = qw(
   isInteger
+  isIcelandic
+  stemSyllables
+  stemUShift
   wordList
   verbParadigm
+  findMixedVerb
+  isStrongVerb
+  isSpecialVerb
   dimToVerbCode
 );
 
