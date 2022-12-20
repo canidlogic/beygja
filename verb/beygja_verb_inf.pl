@@ -6,6 +6,7 @@ use utf8;
 # Beygja imports
 use BeygjaConfig qw(beygja_dbpath);
 use Beygja::DB;
+use Beygja::Util qw(verbParadigm wordList);
 
 # Core imports
 use Unicode::Collate::Locale;
@@ -58,30 +59,39 @@ if ($itype eq 'active') {
   die "Unknown infinitive type '$itype'!\n";
 }
 
-# Connect to verb database using the configured path
+# Connect to verb database using the configured path and wrap all in a
+# single transaction
 #
 my $dbc = Beygja::DB->connect(beygja_dbpath('verb'), 0);
+$dbc->beginWork('r');
 
-# Perform a work block that will contain all operations
+# Get the core wordlist
 #
-my $dbh = $dbc->beginWork('r');
+my @wlist = wordList($dbc, "core");
 
 # Compile a set of all unique infinitives for the given class
 #
 my %iset;
 
-my $sth = $dbh->prepare("SELECT iform FROM infl WHERE icode=?");
-$sth->bind_param(1, $itype);
-$sth->execute;
-
-for(my $rec = $sth->fetchrow_arrayref;
-    defined $rec;
-    $rec = $sth->fetchrow_arrayref) {
-  my $inf = Beygja::DB->dbToString($rec->[0]);
-  $iset{$inf} = 1;
+for my $rec (@wlist) {
+  # Conjugate the current verb
+  my %conj = verbParadigm($dbc, $rec->[1]);
+  
+  # If this verb has the desired type of infinitive, make sure it is in
+  # the set
+  if (defined $conj{$itype}) {
+    my $val = $conj{$itype};
+    if (ref($val)) {
+      for my $v (@$val) {
+        $iset{$v} = 1;
+      }
+    } else {
+      $iset{$val} = 1;
+    }
+  }
 }
 
-# If we got here, finish the work block successfully
+# Finish transaction
 #
 $dbc->finishWork;
 
