@@ -1,0 +1,187 @@
+%beygja-mixed-verbs;
+
+#                    ==============================
+#
+#                    TABLE OF MIXED ICELANDIC VERBS
+#
+#                    ==============================
+#
+# This Shastina data file contains all the "mixed" verbs in Icelandic,
+# excluding derivatives and compounds of verbs in this list.
+#
+# Mixed verbs look like weak verbs in the past tense but their present
+# tense looks like a strong verb.  Mixed verb conjugation can only be
+# used for verbs whose past tense suffix is not "-að" (a-verbs).  Some
+# a-verbs have infinitives that match infinitives on this list, but such
+# verbs must NOT be inflected like mixed verbs.
+#
+# ----------------------------------------------------------------------
+# NOTE:  Neither the 10 "preterite-present" verbs nor the copula verb
+# "vera" are included in this list.  Nor is the exceptional weak verb
+# "meina" which always takes -ar conjugation even when past tense would
+# suggest -ir conjugation.
+# ----------------------------------------------------------------------
+#
+# Shastina dialect used in this file:
+# -----------------------------------
+#
+# Following the %beygja-mixed-verbs; header, the only Shastina entities
+# used in this file are string entities, operators, and the EOF entity.
+#
+# String entities are double-quoted, without any prefix, and never
+# include any backslash escape.  They contain only lowercase letters and
+# the lowercase special letters and diacritic-letters used in Icelandic.
+# String entities push the string value onto the interpreter stack.
+#
+# Operators are documented below.  To the left of the operator is shown
+# which parameters are popped off the stack, with the rightmost
+# parameter being the top of the stack.  None of these operators pushes
+# any result onto the stack, so to the right of the operator is always a
+# hyphen indicating no return values.
+#
+#   [infinitive] [present-singular-3rd] mv  -
+#
+# Declare a mixed verb with the given infinitive and the given present
+# singular 3rd person form.  Remember that a-verbs (past suffix -að) are
+# never inflected as mixed verbs, even if their infinitive appears on
+# this list.
+#
+#   [infinitive] [present-singular-3rd] mva -
+#
+# Same as the "mv" operator, except this operator also has a warning
+# that there is a known a-verb with the same infinitive that should NOT
+# be conjugated as a mixed verb.
+#
+#   [infinitive] [present-singular-3rd] mvo -
+#
+# Same as the "mv" operator, except this mixed verb is optional and the
+# verb may also be inflected as a regular -ir verb in the present.
+#
+#   [infinitive] [present-singular-3rd] mve -
+#
+# Same as the "mv" operator, except this mixed verb is considered an
+# error by some sources and should be strong instead of mixed.
+#
+# Data sources
+# ------------
+#
+# The data in this file was derived from three sources:
+#
+# - BÍN: Beygingarlýsing íslensks nútímamáls (The Database of Icelandic
+#   Inflection, DMII), from the Árni Magnússon Institute for Icelandic
+#   Studies [https://bin.arnastofnun.is/DMII/LTdata/data/].
+#
+# - Colin D. Thomson. "Íslensk Beygingafræði / Isländische Formenlehre /
+#   Icelandic Inflections." (Helmut Buske Verlag, Hamburg; 1987.) ISBN
+#   3-87118-841-7
+#
+# - Sverrir Hólmarsson, Christopher Sanders, and John Tucker. "Íslensk-
+#   ensk orðabók / Concise Icelandic-English Dictionary." (Forlagið,
+#   Reykjavík; 2009.) ISBN 978-9979-53-528-7
+#
+# Mixed verbs on this list have been cross-checked with these three
+# sources.  Thomson lists a few additional mixed verbs and some other
+# exceptional forms that could not be confirmed with the other sources.
+# Those additional forms have not been included here.
+#
+# Verbs that are derivatives of compounds of verbs on this list are not
+# included.  Note that the verb "lykja" has fallen out of use in modern
+# Icelandic, but the derived verb "umlykja" is still in use.  Only the
+# base form "lykja" is included in this list.
+#
+# Author and license
+# ------------------
+#
+# This data file was compiled by:
+# Noah Johnson <noah.johnson@loupmail.com>
+#
+# This data file is provided under the Creative Commons CC0 Public
+# Domain license:
+#
+# To the extent possible under law, Noah Johnson has waived all
+# copyright and related or neighboring rights to "Table of Mixed
+# Icelandic Verbs."  This work is published from: United States.
+
+"berja"   "ber"     mv
+"bryðja"  "bryður"  mv
+"bylja"   "bylur"   mv
+"drynja"  "drynur"  mv
+"dvelja"  "dvelur"  mv
+"dylja"   "dylur"   mv
+"dynja"   "dynur"   mv
+"etja"    "etur"    mv
+"fela"    "felur"   mv
+"fletja"  "fletur"  mv
+"flytja"  "flytur"  mv
+"flýja"   "flýr"    mv
+"fremja"  "fremur"  mv
+"frýja"   "frýr"    mva
+"gleðja"  "gleður"  mv
+"glepja"  "glepur"  mv
+"glymja"  "glymur"  mv
+"gnýja"   "gnýr"    mv
+"gremja"  "gremur"  mv
+"gróa"    "grær"    mv
+"hafa"    "hefur"   mv
+"hemja"   "hemur"   mv
+"heyja"   "heyr"    mvo
+"hrekja"  "hrekur"  mv
+"hrynja"  "hrynur"  mv
+"hvetja"  "hvetur"  mv
+"hyggja"  "hyggur"  mv
+"hylja"   "hylur"   mv
+"klekja"  "klekur"  mv
+"knýja"   "knýr"    mv
+"krefja"  "krefur"  mv
+"kremja"  "kremur"  mv
+"kryfja"  "kryfur"  mv
+"kveðja"  "kveður"  mv
+"kvelja"  "kvelur"  mv
+"leggja"  "leggur"  mv
+"lemja"   "lemur"   mv
+"lepja"   "lepur"   mv
+"letja"   "letur"   mv
+"ljá"     "ljær"    mv
+"lykja"   "lykur"   mv
+"merja"   "mer"     mv
+"mylja"   "mylur"   mv
+"ná"      "nær"     mv
+"núa"     "nýr"     mv
+"ráða"    "ræður"   mve
+"rekja"   "rekur"   mv
+"róa"     "rær"     mva
+"ryðja"   "ryður"   mv
+"rýja"    "rýr"     mvo
+"rymja"   "rymur"   mv
+"seðja"   "seður"   mv
+"selja"   "selur"   mv
+"semja"   "semur"   mv
+"setja"   "setur"   mv
+"ske"     "skeður"  mv
+"skilja"  "skilur"  mv
+"slökkva" "slekkur" mv
+"smyrja"  "smyr"    mv
+"snúa"    "snýr"    mv
+"spyrja"  "spyr"    mv
+"spýja"   "spýr"    mv
+"styðja"  "styður"  mv
+"stynja"  "stynur"  mv
+"tefja"   "tefur"   mv
+"telja"   "telur"   mv
+"temja"   "temur"   mv
+"tyggja"  "tyggur"  mv
+"valda"   "veldur"  mva
+"vefja"   "vefur"   mv
+"vekja"   "vekur"   mv
+"velja"   "velur"   mv
+"venja"   "venur"   mv
+"verja"   "ver"     mv
+"ymja"    "ymur"    mv
+"yrja"    "yr"      mv
+"þekja"   "þekur"   mv
+"þenja"   "þenur"   mv
+"þiggja"  "þiggur"  mv
+"þvo"     "þvær"    mv
+"þylja"   "þylur"   mv
+
+|;
