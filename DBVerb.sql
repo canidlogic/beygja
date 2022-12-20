@@ -51,3 +51,16 @@ CREATE TABLE iflag (
 
 CREATE UNIQUE INDEX ix_iflag_rec
   ON iflag(iid, jid);
+
+-- The mixverb table stores "mixed verbs"; see mixed_verbs.script for
+-- further information
+--
+CREATE TABLE mixverb (
+  mixverb_id    INTEGER PRIMARY KEY ASC,  -- Built-in primary key
+  mixverb_inf   TEXT UNIQUE NOT NULL,     -- Infinitive
+  mixverb_pres  TEXT NOT NULL,            -- Present principal part
+  mixverb_opt   INTEGER NOT NULL          -- 1 if optional, 0 if not
+);
+
+CREATE UNIQUE INDEX ix_mixverb_inf
+  ON mixverb(mixverb_inf);
