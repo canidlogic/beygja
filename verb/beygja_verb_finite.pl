@@ -6,7 +6,17 @@ use utf8;
 # Beygja imports
 use BeygjaConfig qw(beygja_dbpath);
 use Beygja::DB;
-use Beygja::Util qw(isInteger verbParadigm wordList);
+use Beygja::Util qw(
+  isInteger
+  isIcelandic
+  stemSyllables
+  stemUShift
+  verbParadigm
+  findMixedVerb
+  isStrongVerb
+  isSpecialVerb
+  wordList
+);
 
 # Core imports
 use Unicode::Collate::Locale;
@@ -18,7 +28,7 @@ beygja_verb_finite.pl - Check finite forms of regular verbs.
 =head1 SYNOPSIS
 
   ./beygja_verb_finite.pl strict
-  ./beygja_verb_finite.pl loose
+  ./beygja_verb_finite.pl loose -A +F_ip__
 
 =head1 DESCRIPTION
 
@@ -26,22 +36,28 @@ Go through all verbs in the core list defined by C<wordList()> in the
 C<Beygja::Util> module.  For each verb, load the verb paradigm using the
 C<verbParadigm()> function.
 
-Takes a single program argument, C<strict> or C<loose>.  This argument
-only applies when for a specific verb form, there are more inflection
-records than predictions.  If C<strict> is on, matching fails if for any
-specific verb form present in both the inflection records and the
-predictions, the set of forms is not exactly the same.  If C<loose> is
-on, matching is allowed to pass if the predictions are a subset of the
-inflection records.
+The first program argument is either C<strict> or C<loose>.  This
+argument only applies when for a specific verb form, there are more
+inflection records than predictions.  If C<strict> is on, matching fails
+if for any specific verb form present in both the inflection records and
+the predictions, the set of forms is not exactly the same.  If C<loose>
+is on, matching is allowed to pass if the predictions are a subset of
+the inflection records.
 
-Only certain verbs are considered by this script.  First of all, the
-verb I<vera> and all preterite-present verbs I<(eiga, kunna, mega, muna,
-munu, skulu, unna, vilja, vita, þurfa)> are filtered out since they have
-irregular conjugations.
+Any program arguments after the first program argument control which
+predicted forms are examined.  By default, all predicted forms are
+examined.  The filter arguments are processed from left to right, with
+arguments beginning with C<-> removing predicted forms and arguments
+beginning with C<+> adding predicted forms.  You can use an underscore
+C<_> in the predicted form to match any single symbol in the inflection
+code.  The special inflection code C<A> matches all inflection codes, so
+that C<-A> removes all inflected forms and C<+A> adds all inflected
+forms.
 
-Second, I<strong verbs> are filtered out and not considered by this
-script.  A verb is strong if it has any C<Faip3v> form that does not end
-in I<i> or if it has any C<Fmip3v> form that does not end in I<ist>.
+Only certain verbs are considered by this script.  Using functions from
+the C<Beygja::Util> module, all verbs matching C<isSpecialVerb()>,
+C<isStrongVerb()>, and C<findMixedVerb()> are filtered out, so that only
+weak verbs are considered.
 
 For verbs that are not filtered out, the first step is to get the
 principal parts.  The first principal part is the headword, which
@@ -56,200 +72,92 @@ The location of the verb database is determined by C<BeygjaConfig.pm>
 
 =cut
 
-# =========
-# Constants
-# =========
-
-# Set of the headwords for all preterite-present verbs.
-#
-# vera is not counted as a preterite-present verb here.
-#
-my %PRETERITE_PRESENT = (
-  "eiga"  => 1,
-  "kunna" => 1,
-  "mega"  => 1,
-  "muna"  => 1,
-  "munu"  => 1,
-  "skulu" => 1,
-  "unna"  => 1,
-  "vilja" => 1,
-  "vita"  => 1,
-  "þurfa" => 1
-);
-
-# ================
-# Loaded constants
-# ================
-
-# The set of mixed verbs.
-#
-# This is loaded from the mixverb table in the database.  Keys are
-# infinitives and values just map to 1. 
-#
-my %MIXVERB_SET;
-
-# The minimum and maximum lengths of a key in MIXVERB_SET.
-#
-# These are filled in when MIXVERB_SET is loaded.
-#
-my $MIXVERB_MAXLEN;
-my $MIXVERB_MINLEN;
-
 # ===============
 # Local functions
 # ===============
 
-# stemSyllables($dbc, $wordkey)
-# -----------------------------
+# filterMatch(pattern, str)
+# -------------------------
 #
-# Given a Beygja::DB connection to any kind of Beygja database and a
-# primary key for a word, return the number of stem syllables, or undef
-# if not known.
+# Check whether a pattern passed through the program arguments matches a
+# given string.
 #
-sub stemSyllables {
+# pattern is the pattern to check.  If it is just 'A' then it always
+# matches.  Otherwise, check for a specific match to str, with
+# underscores in the pattern meaning any one character allowed at that
+# position.
+#
+sub filterMatch {
   # Get parameters
   ($#_ == 1) or die;
   
-  my $dbc = shift;
-  (ref($dbc) and $dbc->isa("Beygja::DB")) or die;
+  my $pattern = shift;
+  my $str     = shift;
   
-  my $wordkey = shift;
-  (isInteger($wordkey)) or die;
+  ((not ref($pattern)) and (not ref($str))) or die;
   
-  # Perform query
-  my $dbh = $dbc->beginWork('r');
-  my $qr = $dbh->selectrow_arrayref(
-              "SELECT wsy FROM word WHERE wid=?", undef,
-              $wordkey);
-  
-  (defined $qr) or die "Failed to query word ID '$wordkey'";
-  my $result = $qr->[0];
-  
-  # If result is less than one, set to undef
-  unless ($result >= 1) {
-    $result = undef;
+  # If pattern is 'A' then match
+  if ($pattern eq 'A') {
+    return 1;
   }
   
-  # Return result
-  return $result;
+  # If we got here, make sure length of pattern equals length of str,
+  # else no match
+  (length($pattern) == length($str)) or return 0;
+  
+  # If we got here, then get locations of underscores in the pattern
+  my @uloc;
+  while ($pattern =~ /_/g) {
+    push @uloc, (pos($pattern) - 1);
+  }
+  
+  # Replace all the underscore locations in the match string with
+  # underscores
+  for my $ui (@uloc) {
+    substr($str, $ui, 1, '_');
+  }
+  
+  # Check whether strings now match
+  if ($pattern eq $str) {
+    return 1;
+  } else {
+    return 0;
+  }
 }
 
-# isMixedVerb($inf)
-# -----------------
+# allVerbCodes()
+# --------------
 #
-# Given a verb infinitive, check whether it is in the set of mixed
-# verbs.
+# Return an array in list context of all inflection codes supported by
+# this script.
 #
-# %MIXVERB_SET, $MIXVERB_MAXLEN, and $MIXVERB_MINLEN must be filled in.
-# If any of the infinitives in %MIXVERB_SET match the end of the given
-# infinitive, then this function returns 1; else, it returns 0.
-#
-sub isMixedVerb {
-  # Get parameter
-  ($#_ == 0) or die;
-  my $inf = shift;
-  (not ref($inf)) or die;
+sub allVerbCodes {
+  # Check parameters
+  ($#_ < 0) or die;
   
-  # Check state
-  ((defined $MIXVERB_MINLEN) and (defined $MIXVERB_MAXLEN)) or die;
+  # Result starts empty
+  my @result;
   
-  # Let $max_compare be the minimum of MIXVERB_MAXLEN and the length of
-  # the given infinitive
-  my $max_compare = length($inf);
-  unless ($max_compare <= $MIXVERB_MAXLEN) {
-    $max_compare = $MIXVERB_MAXLEN;
-  }
-  
-  # Start with mixed_verb flag at zero
-  my $mixed_verb = 0;
-  
-  # Look for matches at the end of the given infinitive
-  for(my $i = $max_compare; $i >= $MIXVERB_MINLEN; $i--) {
-    # Get the current ending
-    my $ce = substr($inf, 0 - $i);
-    
-    # Check whether in the set
-    if (defined $MIXVERB_SET{$ce}) {
-      $mixed_verb = 1;
-      last;
-    }
-  }
-  
-  # Return result
-  return $mixed_verb;
-}
-
-# isStrongVerb(\%paradigm)
-# ------------------------
-#
-# Given a reference to a verb paradigm map, check whether the verb is a
-# strong verb.
-#
-# If the verb has any Faip3v form that does not end with an "i" or it
-# has any Fmip3v form that does not end with an "ist" then the verb is a
-# strong verb.  In all other cases, the verb is not a strong verb.
-#
-sub isStrongVerb {
-  # Get parameter
-  ($#_ == 0) or die;
-  my $vp = shift;
-  (ref($vp) eq 'HASH') or die;
-  
-  # Start with strong flag clear
-  my $strong_flag = 0;
-  
-  # Check both Faip3v and Fmip3v for strong forms
-  for my $iform ('Faip3v', 'Fmip3v') {
-    # Proceed only if form is defined
-    if (defined $vp->{$iform}) {
-      # Check scalar or array value
-      if (ref($vp->{$iform})) {
-        # Array value, so check each
-        for my $vf (@{$vp->{$iform}}) {
-          # Check for appropriate ending
-          if ($iform eq 'Faip3v') {
-            unless ($vf =~ /i\z/) {
-              $strong_flag = 1;
-              last;
-            }
-          
-          } elsif ($iform eq 'Fmip3v') {
-            unless ($vf =~ /ist\z/) {
-              $strong_flag = 1;
-              last;
-            }
-          
-          } else {
-            die;
+  # Add all finite codes
+  for my $voice ('a', 'm') {
+    for my $mood ('i', 's') {
+      for my $tense ('r', 'p') {
+        for my $person ('1', '2', '3') {
+          for my $number ('v', 'w') {
+            push @result, (sprintf(
+              "F%s%s%s%s%s",
+              $voice, $mood, $tense, $person, $number
+            ));
           }
-        }
-        
-        # If strong flag now set, leave loop
-        (not $strong_flag) or last;
-        
-      } else {
-        # Scalar, so check for appropriate ending
-        if ($iform eq 'Faip3v') {
-          unless ($vp->{$iform} =~ /i\z/) {
-            $strong_flag = 1;
-            last;
-          }
-          
-        } elsif ($iform eq 'Fmip3v') {
-          unless ($vp->{$iform} =~ /ist\z/) {
-            $strong_flag = 1;
-            last;
-          }
-          
-        } else {
-          die;
         }
       }
     }
   }
   
-  # Return resulting strong flag
-  return $strong_flag;
+  # @@TODO:
+  
+  # Return result
+  return @result;
 }
 
 # regularVerbPrincipals($headword, \%paradigm)
@@ -260,7 +168,7 @@ sub isStrongVerb {
 # artificial) infinitive and the second value is an array reference
 # storing one or more (possibly artificial) past singular principal
 # part variants.  All principal parts are in active voice, even if the
-# verb is a middle voice that does not exist in active voice.
+# verb is a middle voice verb that does not exist in active voice.
 #
 # If the headword ends in "st" then the verb is assumed to be a middle
 # voice verb.  The returned active-voice principal parts will be
@@ -284,7 +192,7 @@ sub regularVerbPrincipals {
   ($#_ == 1) or die;
   
   my $headword = shift;
-  (not ref($headword)) or die;
+  isIcelandic($headword) or die;
   
   my $vpara = shift;
   (ref($vpara) eq 'HASH') or die;
@@ -338,78 +246,6 @@ sub regularVerbPrincipals {
   }
 }
 
-# stemUShift($v_stem, $sycount)
-# -----------------------------
-#
-# Given a v-stem and a syllable count, return a v-stem with a U-shift
-# applied.
-#
-sub stemUShift {
-  # Get parameters
-  ($#_ == 1) or die;
-  
-  my $v_stem = shift;
-  (not ref($v_stem)) or die;
-  
-  my $sycount = shift;
-  (isInteger($sycount) and ($sycount > 0)) or die;
-  
-  # Make sure decimal integers 1-3 are not used in the v-stem
-  (not ($v_stem =~ /[1-3]/)) or die;
-  
-  # Replace digraphs au, ei, ey with 1, 2, 3 respectively
-  my $va_stem = $v_stem;
-  
-  $va_stem =~ s/au/1/g;
-  $va_stem =~ s/ei/2/g;
-  $va_stem =~ s/ey/3/g;
-  
-  # If there are no standalone a vowels in altered stem, nothing to do
-  unless ($va_stem =~ /a/) {
-    return $v_stem;
-  }
-  
-  # Build an index of all vowels and dipthongs in the altered v-stem
-  my @vloc;
-  while ($va_stem =~ /[aeiouyáéíóúýæö123]/g) {
-    push @vloc, (pos($va_stem) - 1);
-  }
-  
-  # Count backwards using the syllable count to find the base stem
-  # syllable
-  my $base_index = scalar(@vloc) - $sycount;
-
-  # Make sure base stem syllable is at least zero
-  unless ($base_index >= 0) {
-    $base_index = 0;
-  }
-  
-  # Split altered stem into unshifted prefix, base vowel, and a suffix
-  # that comes after the initial stem a
-  my $prefix = substr($va_stem, 0, $vloc[$base_index]);
-  my $base_v = substr($va_stem, $vloc[$base_index], 1);
-  my $suffix = substr($va_stem, $vloc[$base_index] + 1);
-
-  # If base vowel is "a" change to 'ö'
-  if ($base_v eq 'a') {
-    $base_v = 'ö';
-  }
-
-  # Shift all a vowels in suffix to u
-  $suffix =~ s/a/u/g;
-  
-  # Rejoin the U-shifted stem
-  $va_stem = $prefix . $base_v . $suffix;
-  
-  # Substitute digraphs back in for numbers
-  $va_stem =~ s/1/au/g;
-  $va_stem =~ s/2/ei/g;
-  $va_stem =~ s/3/ey/g;
-  
-  # Return altered stem
-  return $va_stem;
-}
-
 # regularVerbFinite($inf, $past, $sycount)
 # ----------------------------------------
 #
@@ -426,10 +262,10 @@ sub regularVerbFinite {
   ($#_ == 2) or die;
   
   my $inf = shift;
-  (not ref($inf)) or die;
+  isIcelandic($inf) or die;
   
   my $past = shift;
-  (not ref($past)) or die;
+  isIcelandic($past) or die;
   
   my $sycount = shift;
   (isInteger($sycount) and ($sycount > 0)) or die;
@@ -546,9 +382,9 @@ sub regularVerbFinite {
 #
 binmode(STDOUT, ":encoding(UTF-8)") or die;
 
-# Get arguments
+# Get first argument
 #
-($#ARGV == 0) or die "Wrong number of program arguments!\n";
+($#ARGV >= 0) or die "Wrong number of program arguments!\n";
 
 my $strict_match = shift @ARGV;
 if ($strict_match eq 'strict') {
@@ -559,48 +395,69 @@ if ($strict_match eq 'strict') {
   die "Unknown matching mode '$strict_match'!\n";
 }
 
+# Start list of verb codes out with all verb codes
+#
+my %allowed_codes;
+for my $code (allVerbCodes()) {
+  $allowed_codes{$code} = 1;
+}
+
+# Process any remaining arguments as filters on the list of allowed verb
+# codes
+#
+while ($#ARGV >= 0) {
+  # Get next filter code
+  my $fcode = shift @ARGV;
+  
+  # Parse the filter code
+  unless ($fcode =~ /\A([\-+])(.+)\z/) {
+    die "Invalid filter code '$fcode'!\n";
+  }
+  my $fmode = $1;
+  my $fpat  = $2;
+  
+  # Handle filter code according to mode
+  if ($fmode eq '+') { # ===============================================
+    # Additive, so first build a list of all matching codes in the set
+    # of all possible codes
+    my @matches;
+    for my $code (allVerbCodes()) {
+      if (filterMatch($fpat, $code)) {
+        push @matches, ($code);
+      }
+    }
+    
+    # Now add all the matched codes to the allowed list
+    for my $match (@matches) {
+      $allowed_codes{$match} = 1;
+    }
+    
+  } elsif ($fmode eq '-') { # ==========================================
+    # Subtractive, so first build a list of all matching codes currently
+    # in the allowed codes
+    my @matches;
+    for my $code (keys %allowed_codes) {
+      if (filterMatch($fpat, $code)) {
+        push @matches, ($code);
+      }
+    }
+    
+    # Now drop all the matched codes
+    for my $match (@matches) {
+      delete $allowed_codes{$match};
+    }
+    
+  } else { # ===========================================================
+    die;
+  }
+}
+
 # Connect to verb database using the configured path and wrap all in a
 # single transaction
 #
 my $dbc = Beygja::DB->connect(beygja_dbpath('verb'), 0);
 my $dbh = $dbc->beginWork('r');
 my $qr;
-
-# Fill the MIXVERB_SET hash, MIXVERB_MAXLEN & MIXVERB_MINLEN constants
-#
-$qr = $dbh->selectall_arrayref('SELECT mixverb_inf FROM mixverb');
-$MIXVERB_MAXLEN = undef;
-$MIXVERB_MINLEN = undef;
-
-if (defined $qr) {
-  for my $rec (@$qr) {
-    # Get the current mixed verb infinitive and add it to set
-    my $inf = Beygja::DB->dbToString($rec->[0]);
-    $MIXVERB_SET{$inf} = 1;
-    
-    # Update length statistics
-    if (defined $MIXVERB_MAXLEN) {
-      # Statistics defined, so update them
-      if (length($inf) > $MIXVERB_MAXLEN) {
-        $MIXVERB_MAXLEN = length($inf);
-      }
-      
-      if (length($inf) < $MIXVERB_MINLEN) {
-        $MIXVERB_MINLEN = length($inf);
-      }
-      
-    } else {
-      # Statistics not defined yet, so initialize them
-      $MIXVERB_MAXLEN = length($inf);
-      $MIXVERB_MINLEN = $MIXVERB_MAXLEN;
-    }
-  }
-}
-
-unless (defined $MIXVERB_MAXLEN) {
-  $MIXVERB_MAXLEN = 0;
-  $MIXVERB_MINLEN = 0;
-}
 
 # Get the core wordlist
 #
@@ -623,12 +480,11 @@ for my $rec (@wlist) {
     $sycount = 1;
   }
   
-  # If verb is vera, a preterite-present verb, or a strong verb, or a
-  # mixed verb, then skip this record
-  if (($headword eq 'vera')
-        or (defined $PRETERITE_PRESENT{$headword})
+  # If verb is a special verb (preterite-present or vera), or a strong
+  # verb, or a mixed verb, then skip this record
+  if (isSpecialVerb($headword)
         or isStrongVerb(\%conj)
-        or isMixedVerb($headword)) {
+        or (defined findMixedVerb($dbc, $headword))) {
     next;
   }
   
@@ -644,13 +500,18 @@ for my $rec (@wlist) {
   my %prediction;
   
   # Add predicted values using all possibilities for the the past
-  # singular principal part
+  # singular principal part; also, filter out all predictions except
+  # those for codes on the allowed list
   for my $ppart (@$p_past) {
     # Get a prediction for this past principal part
     my %pred = regularVerbFinite($p_inf, $ppart, $sycount);
     
-    # Merge this prediction into the predicted conjugation
+    # Merge this prediction into the predicted conjugation, applying
+    # prediction filtering
     for my $k (keys %pred) {
+      # Skip if key is not in allowed list
+      (defined $allowed_codes{$k}) or next;
+      
       # Check whether key exists in prediction
       if (defined $prediction{$k}) {
         # Key exists in prediction, so check whether new predicted value
