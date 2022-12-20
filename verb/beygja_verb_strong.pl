@@ -6,9 +6,7 @@ use utf8;
 # Beygja imports
 use BeygjaConfig qw(beygja_dbpath);
 use Beygja::DB;
-
-# Core imports
-use Unicode::Collate::Locale;
+use Beygja::Util qw(isStrongVerb verbParadigm wordList);
 
 =head1 NAME
 
@@ -20,21 +18,14 @@ beygja_verb_strong.pl - Create a list of all strong verbs.
 
 =head1 DESCRIPTION
 
-Go through each verb in the verb database word table and get the
-headword.  If the headword ends in "st" then it it is a middle verb;
-else, it is an active verb.  Only verbs in the core set with the default
-grade are considered.
+Go through each verb in the core set defined by the C<wordList()>
+function of C<Beygja::Util>.
 
-For active verbs, look for any Faip3v (past singular 3rd person) forms,
-including with any special verb code prefixes.  If there are any such
-forms that do not end with "i" then the verb is a strong verb.
-
-For middle verbs, look for any Fmip3v (middle past singular 3rd person)
-forms, including with any special verb code prefixes.  If there are any
-such forms that do not end with "ist" then the verb is a strong verb.
-
-Compile a list of strong verbs.  Sort this list according to the
-Icelandic locale and print it out.
+For each verb, fetch the paradigm using the C<verbParadigm()> function
+in the C<Beygja::Util> module and then check whether the verb is strong
+by passing this verb paradigm to the C<isStrongVerb()> function in the
+C<Beygja::Util> module.  Print a list of the infinitives for all strong
+verbs.
 
 The location of the verb database is determined by C<BeygjaConfig.pm>
 
@@ -58,98 +49,31 @@ my $dbc = Beygja::DB->connect(beygja_dbpath('verb'), 0);
 
 # Perform a work block that will contain all operations
 #
-my $dbh = $dbc->beginWork('r');
-my $sth;
-my $qr;
+$dbc->beginWork('r');
 
-# Get an array of all core, default-grade verb headwords and their word
-# keys
+# Get the core wordlist
 #
-my @verb_array;
+my @wlist = wordList($dbc, "core");
 
-$sth = $dbh->prepare(
-  "SELECT wlem, wid FROM word "
-  . "INNER JOIN grade ON grade.gid = word.gid "
-  . "WHERE grade.giv = 1 "
-  . "AND word.wvs = 0");
-$sth->execute;
-for(my $rec = $sth->fetchrow_arrayref;
-    defined $rec;
-    $rec = $sth->fetchrow_arrayref) {
-  push @verb_array, ([
-    Beygja::DB->dbToString($rec->[0]),
-    $rec->[1]
-  ]);
-}
-
-# Go through the array and compile the list of strong verbs
+# Compile the list of strong verbs
 #
-my @strong_verbs;
-
-for my $vrec (@verb_array) {
+for my $vrec (@wlist) {
   # Get verb fields
   my $verb_lem = $vrec->[0];
   my $verb_wid = $vrec->[1];
   
-  # Based on whether this is an active verb or a middle verb, figure out
-  # the LIKE keyword we will be searching for as well as the middle flag
-  my $like_key;
-  my $middle;
+  # Conjugate this verb
+  my %conj = verbParadigm($dbc, $verb_wid);
   
-  if ($verb_lem =~ /st\z/) {
-    # Middle verb
-    $like_key = "%Fmip3v";
-    $middle   = 1;
-  } else {
-    # Active verb
-    $like_key = "%Faip3v";
-    $middle   = 0;
-  }
-  
-  # Get any relevant inflection records
-  $qr = $dbh->selectall_arrayref(
-    "SELECT iform FROM infl WHERE wid=? AND icode LIKE ?", undef,
-    $verb_wid, $like_key);
-  
-  # Strong flag starts clear
-  my $is_strong = 0;
-  
-  # Go through the relevant records
-  if (defined $qr) {
-    for my $r (@$qr) {
-      my $vf = Beygja::DB->dbToString($r->[0]);
-      if ($middle) {
-        # Middle verb, so check whether weak middle ending
-        unless ($vf =~ /ist\z/) {
-          $is_strong = 1;
-          last;
-        }
-      } else {
-        # Active verb, so check whether weak active ending
-        unless ($vf =~ /i\z/) {
-          $is_strong = 1;
-          last;
-        }
-      }
-    }
-  }
-  
-  # If we identified a strong verb, add it to the array
-  if ($is_strong) {
-    push @strong_verbs, ($verb_lem);
+  # Report the verb if it is strong
+  if (isStrongVerb(\%conj)) {
+    print "$verb_lem\n";
   }
 }
 
 # If we got here, finish the work block successfully
 #
 $dbc->finishWork;
-
-# Sort the strong verbs in Icelandic style and print them
-#
-my $col = Unicode::Collate::Locale->new(locale => 'is');
-for my $vb ($col->sort(@strong_verbs)) {
-  print "$vb\n";
-}
 
 =head1 AUTHOR
 
